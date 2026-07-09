@@ -121,7 +121,7 @@ export default function Home() {
     }
   };
 
-  const handleProcessMessage = async (text: string, speakAloud: boolean = false, fileData: { base64: string, name: string, type: string } | null = null) => {
+  const handleProcessMessage = async (text: string, speakAloud: boolean = false, fileData: { extractedText?: string, base64?: string, name: string, type: string } | null = null) => {
     if (!text.trim() && !fileData) return;
     
     // Add user message to UI immediately
@@ -165,23 +165,67 @@ export default function Home() {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const extractPdfText = async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      // Check if already loaded
+      if ((window as any).pdfjsLib) {
+        processPdf();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      script.onload = processPdf;
+      script.onerror = reject;
+      document.body.appendChild(script);
+
+      async function processPdf() {
+        try {
+          const pdfjsLib = (window as any).pdfjsLib;
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          let text = '';
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map((item: any) => item.str).join(' ') + '\n';
+          }
+          resolve(text);
+        } catch (e) {
+          reject(e);
+        }
+      }
+    });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsProcessing(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = (event.target?.result as string).split(',')[1];
+    
+    try {
+      let extractedText = '';
+      if (file.type === 'application/pdf') {
+        extractedText = await extractPdfText(file);
+      } else {
+        extractedText = await file.text();
+      }
+
       await handleProcessMessage('Please review this document.', false, {
-        base64,
+        extractedText,
         name: file.name,
-        type: file.type
+        type: 'text/plain' // Masquerade as plain text to skip backend processing
       });
+    } catch (error) {
+      console.error('File extraction error:', error);
+      const fallbackMsg = "I couldn't read that file. Could you try again?";
+      setMessages(prev => [...prev, { role: 'ai', content: fallbackMsg }]);
+    } finally {
+      setIsProcessing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-    reader.onerror = () => setIsProcessing(false);
-    reader.readAsDataURL(file);
+    }
   };
 
   return (
