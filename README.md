@@ -1,6 +1,6 @@
-# Aura AI - Voice Career Advisor
+# JobTalk - Voice Career Advisor
 
-Aura AI is a modern, real-time multimodal AI Career Advisor built with Next.js, Tailwind CSS, and the Google Gemini API. It acts as an expert Senior Technical Recruiter, allowing you to participate in highly realistic mock interviews and get instant feedback on your resume.
+JobTalk is a modern, real-time multimodal AI Career Advisor built with Next.js, Tailwind CSS, and the Google Gemini API. It acts as an expert Senior Technical Recruiter, allowing you to participate in highly realistic mock interviews and get instant feedback on your resume.
 
 ## Features
 

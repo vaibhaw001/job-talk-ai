@@ -243,7 +243,7 @@ export default function Home() {
             <Briefcase className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="font-bold text-xl tracking-tight text-white leading-tight">Aura</h1>
+            <h1 className="font-bold text-xl tracking-tight text-white leading-tight">JobTalk</h1>
             <p className="text-[10px] text-blue-400 font-semibold tracking-wider uppercase">Career Advisor</p>
           </div>
         </div>
@@ -257,7 +257,7 @@ export default function Home() {
               <div className={`flex flex-col space-y-2 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                 {msg.role === 'ai' && (
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300 font-medium">
-                    <Settings className="w-3 h-3" /> Aura AI
+                    <Settings className="w-3 h-3" /> JobTalk
                   </div>
                 )}
                 <div className={`p-4 rounded-2xl ${
