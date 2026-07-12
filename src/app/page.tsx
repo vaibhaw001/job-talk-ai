@@ -1,12 +1,21 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Settings, Briefcase, Loader2, Square, Paperclip, Send } from 'lucide-react';
+import { Mic, MicOff, Settings, Briefcase, Loader2, Square, Paperclip, Send, Plus, MessageSquare, Menu, X, Trash2, Camera, CameraOff } from 'lucide-react';
 
 interface Message {
   role: 'user' | 'ai';
   content: string;
 }
+
+interface ChatSession {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: Message[];
+}
+
+const DEFAULT_MESSAGE: Message = { role: 'ai', content: "Hello! I'm your AI Career Advisor. Ready for a mock interview or some career advice?" };
 
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
@@ -15,15 +24,78 @@ export default function Home() {
   const [interimTranscript, setInterimTranscript] = useState('');
   const [textInput, setTextInput] = useState('');
   
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'ai', content: "Hello! I'm your AI Career Advisor. Ready for a mock interview or some career advice?" }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([DEFAULT_MESSAGE]);
+  const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  
+  // Camera state
+  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   
   const recognitionRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const processRef = useRef<any>(null);
+  
+  // Load chat history on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('jobtalk_history');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setChatHistory(parsed);
+      } catch (e) {
+        console.error("Failed to parse chat history", e);
+      }
+    }
+  }, []);
+
+  // Save chat history whenever it changes
+  useEffect(() => {
+    if (chatHistory.length > 0) {
+      localStorage.setItem('jobtalk_history', JSON.stringify(chatHistory));
+    } else {
+      localStorage.removeItem('jobtalk_history');
+    }
+  }, [chatHistory]);
+
+  // Update current session in history whenever messages change (if we have a current session or need to create one)
+  useEffect(() => {
+    if (messages.length <= 1 && messages[0]?.content === DEFAULT_MESSAGE.content) return; // Don't save empty default chats
+    
+    setChatHistory(prev => {
+      const existingIdx = prev.findIndex(c => c.id === currentChatId);
+      const title = messages.find(m => m.role === 'user')?.content.slice(0, 30) + '...' || 'New Chat';
+      
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], messages, updatedAt: Date.now() };
+        // Sort by updatedAt descending
+        return updated.sort((a, b) => b.updatedAt - a.updatedAt);
+      } else {
+        // Create new session
+        const newId = Date.now().toString();
+        setCurrentChatId(newId);
+        const newSession: ChatSession = { id: newId, title, updatedAt: Date.now(), messages };
+        return [newSession, ...prev];
+      }
+    });
+  }, [messages, currentChatId]);
+  
+  // Refs to access latest state in speech recognition events
+  const stateRefs = useRef({
+    isRecording: false,
+    transcript: '',
+    interimTranscript: ''
+  });
+
+  useEffect(() => {
+    stateRefs.current = { isRecording, transcript, interimTranscript };
+  }, [isRecording, transcript, interimTranscript]);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {
@@ -66,11 +138,28 @@ export default function Home() {
           console.error('Speech recognition error', event.error);
           setIsRecording(false);
         };
+
+        recognitionRef.current.onend = () => {
+          const state = stateRefs.current;
+          if (state.isRecording) {
+            setIsRecording(false);
+            const fullTranscript = (state.transcript + ' ' + state.interimTranscript).trim();
+            if (fullTranscript) {
+              if (processRef.current) {
+                processRef.current(fullTranscript, true);
+              }
+            }
+          }
+        };
       }
     }
 
     return () => {
       if (recognitionRef.current) recognitionRef.current.stop();
+      // Cleanup camera
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
     };
   }, []);
 
@@ -97,13 +186,45 @@ export default function Home() {
     }
   };
 
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setIsVideoEnabled(true);
+    } catch (err) {
+      console.error("Error accessing camera: ", err);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsVideoEnabled(false);
+  };
+
+  const toggleCamera = () => {
+    if (isVideoEnabled) {
+      stopCamera();
+    } else {
+      startCamera();
+    }
+  };
+
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!textInput.trim() || isProcessing) return;
     
     const msg = textInput.trim();
     setTextInput('');
-    handleProcessMessage(msg, false); // false = don't speak text chats out loud
+    handleProcessMessage(msg, false); 
   };
 
   const speakText = (text: string) => {
@@ -124,6 +245,24 @@ export default function Home() {
   const handleProcessMessage = async (text: string, speakAloud: boolean = false, fileData: { extractedText?: string, base64?: string, name: string, type: string } | null = null) => {
     if (!text.trim() && !fileData) return;
     
+    // Capture video frame if camera is on
+    let imageData = null;
+    if (isVideoEnabled && videoRef.current && videoRef.current.readyState >= 2) {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = videoRef.current.videoWidth;
+        canvas.height = videoRef.current.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          imageData = dataUrl.split(',')[1];
+        }
+      } catch (e) {
+        console.error("Failed to capture video frame", e);
+      }
+    }
+
     // Add user message to UI immediately
     let displayContent = text;
     if (fileData) {
@@ -140,18 +279,25 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           history: newMessages,
-          file: fileData
+          file: fileData,
+          imageData
         }),
       });
       
       if (!res.ok) throw new Error('API Request failed');
       
       const data = await res.json();
+      let aiReply = data.reply;
       
-      setMessages(prev => [...prev, { role: 'ai', content: data.reply }]);
+      if (aiReply.includes('[START_VIDEO]')) {
+        aiReply = aiReply.replace(/\[START_VIDEO\]/g, '').trim();
+        startCamera();
+      }
+      
+      setMessages(prev => [...prev, { role: 'ai', content: aiReply }]);
       
       if (speakAloud) {
-        speakText(data.reply);
+        speakText(aiReply);
       }
     } catch (error) {
       console.error(error);
@@ -165,9 +311,12 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    processRef.current = handleProcessMessage;
+  }, [handleProcessMessage]);
+
   const extractPdfText = async (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
-      // Check if already loaded
       if ((window as any).pdfjsLib) {
         processPdf();
         return;
@@ -216,7 +365,7 @@ export default function Home() {
       await handleProcessMessage('Please review this document.', false, {
         extractedText,
         name: file.name,
-        type: 'text/plain' // Masquerade as plain text to skip backend processing
+        type: 'text/plain' 
       });
     } catch (error) {
       console.error('File extraction error:', error);
@@ -228,127 +377,257 @@ export default function Home() {
     }
   };
 
+  const startNewChat = () => {
+    setCurrentChatId(null);
+    setMessages([DEFAULT_MESSAGE]);
+    if (window.innerWidth < 768) setIsSidebarOpen(false); // Close sidebar on mobile
+  };
+
+  const loadChat = (session: ChatSession) => {
+    setCurrentChatId(session.id);
+    setMessages(session.messages);
+    if (window.innerWidth < 768) setIsSidebarOpen(false); // Close sidebar on mobile
+  };
+
+  const deleteChat = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setChatHistory(prev => prev.filter(c => c.id !== id));
+    if (currentChatId === id) {
+      startNewChat();
+    }
+  };
+
   return (
-    <main className="h-screen bg-slate-950 text-white font-sans selection:bg-blue-500/30 overflow-hidden relative flex flex-col">
-      {/* Background Effects */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[120px]" />
-        <div className="absolute top-[60%] -right-[10%] w-[60%] h-[60%] rounded-full bg-sky-500/5 blur-[150px]" />
-      </div>
+    <div className="flex h-screen bg-slate-950 text-white font-sans selection:bg-blue-500/30 overflow-hidden relative">
+      
+      {/* Sidebar Overlay (Mobile) */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden" 
+          onClick={() => setIsSidebarOpen(false)} 
+        />
+      )}
 
-      {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-white/5 backdrop-blur-md shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-sky-400 flex items-center justify-center shadow-lg shadow-blue-600/20">
-            <Briefcase className="w-5 h-5 text-white" />
+      {/* Sidebar */}
+      <aside className={`
+        fixed md:relative z-50 h-full w-72 flex flex-col bg-slate-900/80 backdrop-blur-xl border-r border-white/5 transition-transform duration-300
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 md:w-0 md:border-none md:overflow-hidden'}
+      `}>
+        <div className="p-4 flex items-center justify-between border-b border-white/5">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-sky-400 flex items-center justify-center">
+              <Briefcase className="w-4 h-4 text-white" />
+            </div>
+            <span className="font-bold tracking-tight">JobTalk</span>
           </div>
-          <div>
-            <h1 className="font-bold text-xl tracking-tight text-white leading-tight">JobTalk</h1>
-            <p className="text-[10px] text-blue-400 font-semibold tracking-wider uppercase">Career Advisor</p>
-          </div>
+          <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/5">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      </header>
 
-      {/* Chat History Area */}
-      <div className="flex-1 relative z-10 overflow-y-auto px-4 py-8 space-y-8 scroll-smooth">
-        <div className="max-w-3xl mx-auto w-full space-y-8">
-          {messages.map((msg, idx) => (
-            <div key={idx} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex flex-col space-y-2 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                {msg.role === 'ai' && (
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300 font-medium">
-                    <Settings className="w-3 h-3" /> JobTalk
+        <div className="p-4">
+          <button 
+            onClick={startNewChat}
+            className="w-full flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors shadow-lg shadow-blue-600/20 font-medium text-sm"
+          >
+            <Plus className="w-4 h-4" /> New Interview
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-1 custom-scrollbar">
+          <div className="px-2 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">Previous Chats</div>
+          {chatHistory.length === 0 ? (
+            <div className="px-2 py-4 text-sm text-slate-500 italic">No previous chats</div>
+          ) : (
+            chatHistory.map(session => (
+              <div 
+                key={session.id}
+                onClick={() => loadChat(session)}
+                className={`group flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer transition-colors ${currentChatId === session.id ? 'bg-white/10 text-white' : 'hover:bg-white/5 text-slate-300'}`}
+              >
+                <MessageSquare className="w-4 h-4 shrink-0 opacity-50" />
+                <div className="flex-1 truncate text-sm">{session.title}</div>
+                <button 
+                  onClick={(e) => deleteChat(e, session.id)}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-400 hover:bg-white/10 rounded-lg transition-all shrink-0"
+                  title="Delete Chat"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </aside>
+
+      {/* Main Chat Area */}
+      <main className="flex-1 flex flex-col relative overflow-hidden h-full">
+        {/* Background Effects */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[120px]" />
+          <div className="absolute top-[60%] -right-[10%] w-[60%] h-[60%] rounded-full bg-sky-500/5 blur-[150px]" />
+        </div>
+
+        {/* Header */}
+        <header className="relative z-10 flex items-center justify-between px-4 md:px-8 py-4 border-b border-white/5 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-3">
+            {!isSidebarOpen && (
+              <button 
+                onClick={() => setIsSidebarOpen(true)}
+                className="p-2 -ml-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
+            <div>
+              <h1 className="font-bold text-xl tracking-tight text-white leading-tight">JobTalk</h1>
+              <p className="text-[10px] text-blue-400 font-semibold tracking-wider uppercase">Career Advisor</p>
+            </div>
+          </div>
+        </header>
+
+        {/* Camera Floating Box */}
+        {isVideoEnabled && (
+          <div className="absolute top-20 right-8 z-30 w-48 h-36 md:w-64 md:h-48 bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10 shadow-black/50 animate-in fade-in slide-in-from-top-4 duration-500">
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              muted
+              className="w-full h-full object-cover scale-x-[-1]" 
+            />
+            <button 
+              onClick={stopCamera}
+              className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-500/80 backdrop-blur-md rounded-lg text-white transition-colors"
+              title="Close Camera"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Chat History Area */}
+        <div className="flex-1 relative z-10 overflow-y-auto px-4 py-8 space-y-8 scroll-smooth">
+          <div className="max-w-3xl mx-auto w-full space-y-8">
+            {messages.map((msg, idx) => (
+              <div key={idx} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`flex flex-col space-y-2 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  {msg.role === 'ai' && (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300 font-medium">
+                      <Settings className="w-3 h-3" /> JobTalk
+                    </div>
+                  )}
+                  <div className={`p-4 rounded-2xl ${
+                    msg.role === 'user' 
+                      ? 'bg-blue-600 text-white shadow-[0_4px_20px_-10px_rgba(37,99,235,0.4)] rounded-tr-none' 
+                      : 'bg-white/5 border border-white/10 text-slate-200 shadow-xl shadow-black/20 backdrop-blur-sm rounded-tl-none'
+                  }`}>
+                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                   </div>
-                )}
-                <div className={`p-4 rounded-2xl ${
-                  msg.role === 'user' 
-                    ? 'bg-blue-600 text-white shadow-[0_4px_20px_-10px_rgba(37,99,235,0.4)] rounded-tr-none' 
-                    : 'bg-white/5 border border-white/10 text-slate-200 shadow-xl shadow-black/20 backdrop-blur-sm rounded-tl-none'
-                }`}>
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                 </div>
               </div>
-            </div>
-          ))}
-          
-          {/* Active Voice Transcript Bubble */}
-          {(transcript || interimTranscript) && (
-             <div className="flex w-full justify-end">
-               <div className="flex flex-col space-y-2 max-w-[80%] items-end opacity-70 animate-pulse">
-                 <div className="p-4 rounded-2xl bg-blue-600/50 text-white border border-blue-500/30 rounded-tr-none">
-                   <p className="whitespace-pre-wrap leading-relaxed italic">
-                     {transcript} <span className="text-white/60">{interimTranscript}</span>
-                   </p>
+            ))}
+            
+            {/* Active Voice Transcript Bubble */}
+            {(transcript || interimTranscript) && (
+               <div className="flex w-full justify-end">
+                 <div className="flex flex-col space-y-2 max-w-[80%] items-end opacity-70 animate-pulse">
+                   <div className="p-4 rounded-2xl bg-blue-600/50 text-white border border-blue-500/30 rounded-tr-none">
+                     <p className="whitespace-pre-wrap leading-relaxed italic">
+                       {transcript} <span className="text-white/60">{interimTranscript}</span>
+                     </p>
+                   </div>
                  </div>
                </div>
-             </div>
-          )}
-          
-          {/* Typing Indicator */}
-          {isProcessing && (
-            <div className="flex w-full justify-start">
-               <div className="p-4 rounded-2xl bg-white/5 border border-white/10 rounded-tl-none flex gap-2 items-center">
-                 <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                 <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                 <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
-               </div>
+            )}
+            
+            {/* Typing Indicator */}
+            {isProcessing && (
+              <div className="flex w-full justify-start">
+                 <div className="p-4 rounded-2xl bg-white/5 border border-white/10 rounded-tl-none flex gap-2 items-center">
+                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
+                 </div>
+              </div>
+            )}
+            <div ref={chatEndRef} className="h-4" />
+          </div>
+        </div>
+
+        {/* Input Area */}
+        <div className="relative z-10 w-full px-4 pb-6 pt-2 shrink-0 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent">
+          <div className="max-w-3xl mx-auto flex items-end gap-3 relative">
+            
+            {/* Text & Upload Input */}
+            <form onSubmit={handleTextSubmit} className="flex-1 bg-white/5 border border-white/10 rounded-3xl flex items-center p-1.5 focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all duration-300 backdrop-blur-xl shadow-lg shadow-black/20">
+              <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.txt,.md,.docx" onChange={handleFileUpload} />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
+                title="Upload Resume"
+                disabled={isProcessing}
+              >
+                <Paperclip className="w-5 h-5" />
+              </button>
+              <input 
+                type="text" 
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                placeholder="Type a message or upload your resume..."
+                className="flex-1 bg-transparent border-none outline-none text-slate-200 placeholder:text-slate-500 px-2"
+                disabled={isProcessing}
+              />
+              <button
+                type="submit"
+                disabled={!textInput.trim() || isProcessing}
+                className="p-3 text-blue-400 hover:text-white hover:bg-blue-600 rounded-full transition-colors disabled:opacity-30"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </form>
+
+            <div className="flex gap-2">
+              {/* Camera Toggle Button */}
+              <button
+                 onClick={toggleCamera}
+                 disabled={isProcessing}
+                 className={`shrink-0 flex items-center justify-center w-12 h-12 md:w-14 md:h-14 rounded-full transition-all duration-300 shadow-lg ${
+                   isVideoEnabled 
+                     ? 'bg-slate-700 text-white hover:bg-slate-600 shadow-black/20' 
+                     : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white shadow-black/20'
+                 } disabled:opacity-50`}
+                 title="Toggle Camera"
+               >
+                  {isVideoEnabled ? (
+                    <CameraOff className="w-5 h-5 md:w-6 md:h-6" />
+                  ) : (
+                    <Camera className="w-5 h-5 md:w-6 md:h-6" />
+                  )}
+              </button>
+
+              {/* Voice Record Button */}
+              <button
+                 onClick={toggleRecording}
+                 disabled={isProcessing}
+                 className={`shrink-0 flex items-center justify-center w-12 h-12 md:w-14 md:h-14 rounded-full transition-all duration-500 shadow-xl ${
+                   isRecording 
+                     ? 'bg-red-500 text-white animate-pulse shadow-red-500/30' 
+                     : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30'
+                 } disabled:opacity-50 disabled:pointer-events-none`}
+                 title="Toggle Microphone"
+               >
+                  {isRecording ? (
+                    <Square className="w-5 h-5 md:w-6 md:h-6 fill-current" />
+                  ) : (
+                    <Mic className="w-5 h-5 md:w-6 md:h-6 fill-current" />
+                  )}
+               </button>
             </div>
-          )}
-          <div ref={chatEndRef} className="h-4" />
+          </div>
         </div>
-      </div>
-
-      {/* Input Area */}
-      <div className="relative z-10 w-full px-4 pb-6 pt-2 shrink-0 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent">
-        <div className="max-w-3xl mx-auto flex items-end gap-3 relative">
-          
-          {/* Text & Upload Input */}
-          <form onSubmit={handleTextSubmit} className="flex-1 bg-white/5 border border-white/10 rounded-3xl flex items-center p-1.5 focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all duration-300 backdrop-blur-xl shadow-lg shadow-black/20">
-            <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.txt,.md,.docx" onChange={handleFileUpload} />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
-              title="Upload Resume"
-              disabled={isProcessing}
-            >
-              <Paperclip className="w-5 h-5" />
-            </button>
-            <input 
-              type="text" 
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Type a message or upload your resume..."
-              className="flex-1 bg-transparent border-none outline-none text-slate-200 placeholder:text-slate-500 px-2"
-              disabled={isProcessing}
-            />
-            <button
-              type="submit"
-              disabled={!textInput.trim() || isProcessing}
-              className="p-3 text-blue-400 hover:text-white hover:bg-blue-600 rounded-full transition-colors disabled:opacity-30"
-            >
-              <Send className="w-5 h-5" />
-            </button>
-          </form>
-
-          {/* Voice Record Button */}
-          <button
-             onClick={toggleRecording}
-             disabled={isProcessing}
-             className={`shrink-0 flex items-center justify-center w-14 h-14 rounded-full transition-all duration-500 shadow-xl ${
-               isRecording 
-                 ? 'bg-red-500 text-white animate-pulse shadow-red-500/30' 
-                 : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30'
-             } disabled:opacity-50 disabled:pointer-events-none`}
-           >
-              {isRecording ? (
-                <Square className="w-6 h-6 fill-current" />
-              ) : (
-                <Mic className="w-6 h-6 fill-current" />
-              )}
-           </button>
-        </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

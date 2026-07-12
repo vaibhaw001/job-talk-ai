@@ -23,11 +23,13 @@ const SYSTEM_PROMPT = "You are an expert AI Career Advisor and Senior Technical 
 "- Keep responses CONCISE. Aim for 1-4 short sentences per turn.\\n" +
 "- DO NOT use markdown, bullet points, asterisks, or special formatting unless strictly necessary for readability.\\n" +
 "- Speak naturally. You are a real, professional recruiter and advisor.\\n" +
+"- If the user asks to start a mock interview, you must include the exact text [START_VIDEO] anywhere in your response. This special command will automatically turn on their camera for the interview.\\n" +
+"- You will receive image snapshots of the user during the interview. Analyze their eye contact, posture, and facial expression as part of your feedback.\\n" +
 "- If the user asks for a mock interview, ask one question at a time and wait for their response. Do not ask multi-part questions all at once.";
 
 export async function POST(req: Request) {
   try {
-    const { history, file } = await req.json();
+    const { history, file, imageData } = await req.json();
 
     let extractedText = '';
 
@@ -86,9 +88,17 @@ export async function POST(req: Request) {
           if (msg === history[history.length - 1] && extractedText) {
             contentText += `\n\n--- UPLOADED DOCUMENT CONTENT ---\n${extractedText}`;
           }
+          let contentData: any = contentText;
+          if (msg === history[history.length - 1] && imageData) {
+            contentData = [
+              { type: "text", text: contentText },
+              { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageData}` } }
+            ];
+          }
+
           return {
             role: msg.role === 'ai' ? 'assistant' : 'user',
-            content: contentText
+            content: contentData
           };
         })
       ];
@@ -115,9 +125,19 @@ export async function POST(req: Request) {
         if (msg === history[history.length - 1] && extractedText) {
           contentText += `\n\n--- UPLOADED DOCUMENT CONTENT ---\n${extractedText}`;
         }
+        const parts: any[] = [{ text: contentText }];
+        if (msg === history[history.length - 1] && imageData) {
+          parts.push({
+            inlineData: {
+              data: imageData,
+              mimeType: "image/jpeg"
+            }
+          });
+        }
+        
         return {
           role: msg.role === 'ai' ? 'model' : 'user',
-          parts: [{ text: contentText }]
+          parts: parts
         };
       });
 
