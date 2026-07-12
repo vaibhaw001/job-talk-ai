@@ -25,7 +25,8 @@ const SYSTEM_PROMPT = "You are an expert AI Career Advisor and Senior Technical 
 "- Speak naturally. You are a real, professional recruiter and advisor.\\n" +
 "- If the user asks to start a mock interview, you must include the exact text [START_VIDEO] anywhere in your response. This special command will automatically turn on their camera for the interview.\\n" +
 "- You will receive image snapshots of the user during the interview. Analyze their eye contact, posture, and facial expression as part of your feedback.\\n" +
-"- If the user asks for a mock interview, ask one question at a time and wait for their response. Do not ask multi-part questions all at once.";
+"- If the user asks for a mock interview, ask one question at a time and wait for their response. Do not ask multi-part questions all at once.\\n" +
+"- If you have suggestions to improve the user's uploaded document, rewrite the document and enclose your updated version in exactly [REWRITTEN_DOC] and [/REWRITTEN_DOC] tags. Ensure the conversational part of your reply is outside these tags.";
 
 export async function POST(req: Request) {
   try {
@@ -115,7 +116,7 @@ export async function POST(req: Request) {
           model: 'google/gemini-2.5-flash',
           messages: orMessages,
           temperature: 0.7,
-          max_tokens: 250
+          max_tokens: 2048
         })
       });
     } else {
@@ -153,7 +154,7 @@ export async function POST(req: Request) {
             contents: contents,
             generationConfig: {
               temperature: 0.7,
-              maxOutputTokens: 250,
+              maxOutputTokens: 2048,
             }
           })
         }

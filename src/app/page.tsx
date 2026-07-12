@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Settings, Briefcase, Loader2, Square, Paperclip, Send, Plus, MessageSquare, Menu, X, Trash2, Camera, CameraOff } from 'lucide-react';
+import { Mic, MicOff, Settings, Briefcase, Loader2, Square, Paperclip, Send, Plus, MessageSquare, Menu, X, Trash2, Camera, CameraOff, Copy, FileText, Check, Download } from 'lucide-react';
+import jsPDF from 'jspdf';
 
 interface Message {
   role: 'user' | 'ai';
   content: string;
+  revisedDoc?: string;
 }
 
 interface ChatSession {
@@ -288,13 +290,20 @@ export default function Home() {
       
       const data = await res.json();
       let aiReply = data.reply;
+      let revisedDocStr = undefined;
+      
+      const docMatch = aiReply.match(/\[REWRITTEN_DOC\]([\s\S]*?)\[\/REWRITTEN_DOC\]/);
+      if (docMatch) {
+         revisedDocStr = docMatch[1].trim();
+         aiReply = aiReply.replace(/\[REWRITTEN_DOC\][\s\S]*?\[\/REWRITTEN_DOC\]/g, '').trim();
+      }
       
       if (aiReply.includes('[START_VIDEO]')) {
         aiReply = aiReply.replace(/\[START_VIDEO\]/g, '').trim();
         startCamera();
       }
       
-      setMessages(prev => [...prev, { role: 'ai', content: aiReply }]);
+      setMessages(prev => [...prev, { role: 'ai', content: aiReply, revisedDoc: revisedDocStr }]);
       
       if (speakAloud) {
         speakText(aiReply);
@@ -395,6 +404,62 @@ export default function Home() {
     if (currentChatId === id) {
       startNewChat();
     }
+  };
+
+  const handleDownloadDocument = (text: string) => {
+    let fileName = 'revised-document.txt';
+    let isPdf = false;
+    
+    // Find the most recently uploaded file in the chat history
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const match = messages[i].content.match(/\[Uploaded File: (.+?)\]/);
+      if (match) {
+        fileName = match[1];
+        if (fileName.toLowerCase().endsWith('.pdf')) {
+           isPdf = true;
+        }
+        break;
+      }
+    }
+
+    const downloadName = `AI_Revised_${fileName}`;
+
+    if (isPdf) {
+      try {
+        const doc = new jsPDF();
+        const splitText = doc.splitTextToSize(text, 180);
+        
+        let y = 15;
+        for (let i = 0; i < splitText.length; i++) {
+          if (y > 280) {
+            doc.addPage();
+            y = 15;
+          }
+          doc.text(splitText[i], 15, y);
+          y += 7;
+        }
+        
+        doc.save(downloadName);
+      } catch (err) {
+        console.error("Failed to generate PDF", err);
+        // Fallback to text
+        downloadAsText(text, downloadName.replace('.pdf', '.txt'));
+      }
+    } else {
+      downloadAsText(text, downloadName);
+    }
+  };
+
+  const downloadAsText = (text: string, filename: string) => {
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename.endsWith('.txt') || filename.endsWith('.md') ? filename : filename + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -524,6 +589,40 @@ export default function Home() {
                   }`}>
                     <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                   </div>
+                  {msg.revisedDoc && (
+                    <div className="w-full mt-2 bg-slate-900/50 border border-emerald-500/30 rounded-xl overflow-hidden shadow-lg shadow-emerald-900/20 backdrop-blur-sm animate-in slide-in-from-top-2">
+                      <div className="bg-emerald-500/10 px-4 py-2 border-b border-emerald-500/20 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase tracking-wider">
+                          <FileText className="w-4 h-4" /> AI Revised Document
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => handleDownloadDocument(msg.revisedDoc!)}
+                            className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/40 px-2 py-1 rounded transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5" /> Download
+                          </button>
+                          <button 
+                            onClick={() => {
+                              navigator.clipboard.writeText(msg.revisedDoc!);
+                              const btn = document.activeElement as HTMLElement;
+                              if (btn) {
+                                const original = btn.innerHTML;
+                                btn.innerHTML = 'Copied!';
+                                setTimeout(() => btn.innerHTML = original, 2000);
+                              }
+                            }}
+                            className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/40 px-2 py-1 rounded transition-colors"
+                          >
+                            <Copy className="w-3.5 h-3.5" /> Copy
+                          </button>
+                        </div>
+                      </div>
+                      <div className="p-4 max-h-96 overflow-y-auto custom-scrollbar">
+                        <pre className="text-sm text-slate-300 whitespace-pre-wrap font-sans leading-relaxed">{msg.revisedDoc}</pre>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
