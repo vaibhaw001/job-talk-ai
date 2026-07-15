@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Settings, Briefcase, Loader2, Square, Paperclip, Send, Plus, MessageSquare, Menu, X, Trash2, Camera, CameraOff, Copy, FileText, Check, Download } from 'lucide-react';
+import { Mic, MicOff, Settings, Briefcase, Loader2, Square, Paperclip, Send, Plus, MessageSquare, Menu, X, Trash2, Camera, CameraOff, Copy, FileText, Check, Download, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   role: 'user' | 'ai';
@@ -25,6 +27,7 @@ export default function Home() {
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [textInput, setTextInput] = useState('');
+  const [attachedFile, setAttachedFile] = useState<{ extractedText: string, name: string, type: string } | null>(null);
   
   const [messages, setMessages] = useState<Message[]>([DEFAULT_MESSAGE]);
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
@@ -222,11 +225,13 @@ export default function Home() {
 
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!textInput.trim() || isProcessing) return;
+    if ((!textInput.trim() && !attachedFile) || isProcessing) return;
     
-    const msg = textInput.trim();
+    const msg = textInput.trim() || 'Please review this document.';
     setTextInput('');
-    handleProcessMessage(msg, false); 
+    const fileToProcess = attachedFile;
+    setAttachedFile(null);
+    handleProcessMessage(msg, false, fileToProcess); 
   };
 
   const speakText = (text: string) => {
@@ -371,10 +376,10 @@ export default function Home() {
         extractedText = await file.text();
       }
 
-      await handleProcessMessage('Please review this document.', false, {
+      setAttachedFile({
         extractedText,
         name: file.name,
-        type: 'text/plain' 
+        type: file.type || 'text/plain' 
       });
     } catch (error) {
       console.error('File extraction error:', error);
@@ -406,6 +411,58 @@ export default function Home() {
     }
   };
 
+  const handleRegenerate = async () => {
+    if (isProcessing || messages.length < 2) return;
+    
+    // Find the last user message
+    let lastUserIndex = messages.length - 1;
+    while (lastUserIndex >= 0 && messages[lastUserIndex].role !== 'user') {
+       lastUserIndex--;
+    }
+    
+    if (lastUserIndex < 0) return;
+    
+    const prevMessages = messages.slice(0, lastUserIndex + 1);
+    setMessages(prevMessages);
+    
+    setIsProcessing(true);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          history: prevMessages,
+          file: null, 
+          imageData: null
+        }),
+      });
+      
+      if (!res.ok) throw new Error('API Request failed');
+      
+      const data = await res.json();
+      let aiReply = data.reply;
+      let revisedDocStr = undefined;
+      
+      const docMatch = aiReply.match(/\[REWRITTEN_DOC\]([\s\S]*?)\[\/REWRITTEN_DOC\]/);
+      if (docMatch) {
+         revisedDocStr = docMatch[1].trim();
+         aiReply = aiReply.replace(/\[REWRITTEN_DOC\][\s\S]*?\[\/REWRITTEN_DOC\]/g, '').trim();
+      }
+      
+      if (aiReply.includes('[START_VIDEO]')) {
+        aiReply = aiReply.replace(/\[START_VIDEO\]/g, '').trim();
+        if (!isVideoEnabled) startCamera();
+      }
+      
+      setMessages([...prevMessages, { role: 'ai', content: aiReply, revisedDoc: revisedDocStr }]);
+    } catch (e) {
+      console.error(e);
+      setMessages([...prevMessages, { role: 'ai', content: "I'm having trouble connecting right now." }]);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleDownloadDocument = (text: string) => {
     let fileName = 'revised-document.txt';
     let isPdf = false;
@@ -427,16 +484,88 @@ export default function Home() {
     if (isPdf) {
       try {
         const doc = new jsPDF();
-        const splitText = doc.splitTextToSize(text, 180);
-        
         let y = 15;
-        for (let i = 0; i < splitText.length; i++) {
-          if (y > 280) {
-            doc.addPage();
-            y = 15;
+        const margin = 15;
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const maxLineWidth = pageWidth - margin * 2;
+
+        const lines = text.split('\n');
+        
+        for (let i = 0; i < lines.length; i++) {
+          let line = lines[i].trim();
+          let fontSize = 10;
+          let fontStyle = 'normal';
+          let isHeader = false;
+          let isBullet = false;
+          let underline = false;
+          
+          // Parse headings
+          if (line.startsWith('# ')) {
+             fontSize = 16;
+             fontStyle = 'bold';
+             line = line.replace('# ', '');
+             isHeader = true;
+             underline = true;
+             if (y > 15) y += 5;
+          } else if (line.startsWith('## ')) {
+             fontSize = 13;
+             fontStyle = 'bold';
+             line = line.replace('## ', '');
+             isHeader = true;
+             underline = true;
+             if (y > 15) y += 3.5;
+          } else if (line.startsWith('### ')) {
+             fontSize = 11;
+             fontStyle = 'bold';
+             line = line.replace('### ', '');
+             isHeader = true;
+             if (y > 15) y += 2.5;
           }
-          doc.text(splitText[i], 15, y);
-          y += 7;
+          
+          // Clean up markdown bold/italic asterisks
+          line = line.replace(/\*\*/g, '').replace(/\*/g, '');
+          
+          // Handle bullets and indentation
+          let x = margin;
+          if (line.startsWith('- ')) {
+            isBullet = true;
+            x = margin + 5;
+            line = line.substring(2).trim();
+          }
+
+          doc.setFontSize(fontSize);
+          doc.setFont('helvetica', fontStyle);
+          
+          // Split text to fit within page width
+          const splitLines = doc.splitTextToSize(line, maxLineWidth - (x - margin));
+          
+          for (let j = 0; j < splitLines.length; j++) {
+            if (y > 282) {
+              doc.addPage();
+              y = 15;
+            }
+            
+            if (j === 0 && isBullet) {
+               doc.text('•', margin + 1, y);
+            }
+            
+            doc.text(splitLines[j], x, y);
+            
+            if (j === 0 && underline) {
+               const textWidth = doc.getTextWidth(splitLines[j]);
+               doc.setLineWidth(0.2);
+               doc.line(x, y + 1.2, x + textWidth, y + 1.2);
+            }
+            
+            y += (fontSize * 0.35) + 1.2; 
+          }
+          
+          // Add extra spacing after paragraphs/headers, but not if it's already an empty line
+          if (line !== '') {
+             y += 0.5;
+          } else {
+             y += 1.5; // Spacing for empty line
+          }
         }
         
         doc.save(downloadName);
@@ -587,8 +716,45 @@ export default function Home() {
                       ? 'bg-blue-600 text-white shadow-[0_4px_20px_-10px_rgba(37,99,235,0.4)] rounded-tr-none' 
                       : 'bg-white/5 border border-white/10 text-slate-200 shadow-xl shadow-black/20 backdrop-blur-sm rounded-tl-none'
                   }`}>
-                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                    {msg.role === 'user' ? (
+                       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                    ) : (
+                       <div className="prose prose-invert max-w-none text-slate-200 prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/10 prose-a:text-blue-400">
+                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                           {msg.content}
+                         </ReactMarkdown>
+                       </div>
+                    )}
                   </div>
+                  {msg.role === 'ai' && (
+                    <div className="flex items-center gap-3 mt-1 px-1">
+                       <button
+                         onClick={() => {
+                           navigator.clipboard.writeText(msg.content);
+                           const btn = document.activeElement as HTMLElement;
+                           if (btn) {
+                             const original = btn.innerHTML;
+                             btn.innerHTML = '<svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied';
+                             setTimeout(() => btn.innerHTML = original, 2000);
+                           }
+                         }}
+                         className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
+                         title="Copy Message"
+                       >
+                         <Copy className="w-3 h-3" /> Copy
+                       </button>
+                       
+                       {idx === messages.length - 1 && (
+                         <button
+                           onClick={handleRegenerate}
+                           className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
+                           title="Regenerate Response"
+                         >
+                           <RefreshCw className="w-3 h-3" /> Regenerate
+                         </button>
+                       )}
+                    </div>
+                  )}
                   {msg.revisedDoc && (
                     <div className="w-full mt-2 bg-slate-900/50 border border-emerald-500/30 rounded-xl overflow-hidden shadow-lg shadow-emerald-900/20 backdrop-blur-sm animate-in slide-in-from-top-2">
                       <div className="bg-emerald-500/10 px-4 py-2 border-b border-emerald-500/20 flex items-center justify-between">
@@ -656,10 +822,25 @@ export default function Home() {
 
         {/* Input Area */}
         <div className="relative z-10 w-full px-4 pb-6 pt-2 shrink-0 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent">
-          <div className="max-w-3xl mx-auto flex items-end gap-3 relative">
+          <div className="max-w-3xl mx-auto flex flex-col gap-2 relative">
+            
+            {attachedFile && (
+              <div className="self-start flex items-center gap-2 bg-blue-500/20 border border-blue-500/40 text-blue-200 px-3 py-1.5 rounded-xl text-sm backdrop-blur-md animate-in slide-in-from-bottom-2">
+                <FileText className="w-4 h-4" />
+                <span className="truncate max-w-[200px] font-medium">{attachedFile.name}</span>
+                <button 
+                  type="button"
+                  onClick={() => setAttachedFile(null)}
+                  className="ml-1 p-1 hover:bg-blue-500/30 rounded-md transition-colors"
+                  title="Remove attachment"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
             
             {/* Text & Upload Input */}
-            <form onSubmit={handleTextSubmit} className="flex-1 bg-white/5 border border-white/10 rounded-3xl flex items-center p-1.5 focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all duration-300 backdrop-blur-xl shadow-lg shadow-black/20">
+            <form onSubmit={handleTextSubmit} className="w-full bg-white/5 border border-white/10 rounded-3xl flex items-center p-1.5 focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all duration-300 backdrop-blur-xl shadow-lg shadow-black/20">
               <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.txt,.md,.docx" onChange={handleFileUpload} />
               <button
                 type="button"
@@ -680,7 +861,7 @@ export default function Home() {
               />
               <button
                 type="submit"
-                disabled={!textInput.trim() || isProcessing}
+                disabled={(!textInput.trim() && !attachedFile) || isProcessing}
                 className="p-3 text-blue-400 hover:text-white hover:bg-blue-600 rounded-full transition-colors disabled:opacity-30"
               >
                 <Send className="w-5 h-5" />
