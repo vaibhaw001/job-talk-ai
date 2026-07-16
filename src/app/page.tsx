@@ -5,6 +5,7 @@ import { Mic, MicOff, Settings, Briefcase, Loader2, Square, Paperclip, Send, Plu
 import jsPDF from 'jspdf';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { BoltStyleChat } from '@/components/ui/bolt-style-chat';
 
 interface Message {
   role: 'user' | 'ai';
@@ -656,257 +657,272 @@ export default function Home() {
 
       {/* Main Chat Area */}
       <main className="flex-1 flex flex-col relative overflow-hidden h-full">
-        {/* Background Effects */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[120px]" />
-          <div className="absolute top-[60%] -right-[10%] w-[60%] h-[60%] rounded-full bg-sky-500/5 blur-[150px]" />
-        </div>
-
-        {/* Header */}
-        <header className="relative z-10 flex items-center justify-between px-4 md:px-8 py-4 border-b border-white/5 backdrop-blur-md shrink-0">
-          <div className="flex items-center gap-3">
-            {!isSidebarOpen && (
-              <button 
-                onClick={() => setIsSidebarOpen(true)}
-                className="p-2 -ml-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-            )}
-            <div>
-              <h1 className="font-bold text-xl tracking-tight text-white leading-tight">JobTalk</h1>
-              <p className="text-[10px] text-blue-400 font-semibold tracking-wider uppercase">Career Advisor</p>
+        {messages.length === 1 && messages[0].content === DEFAULT_MESSAGE.content ? (
+          <BoltStyleChat 
+            title="JobTalk"
+            subtitle="Your AI Career Advisor"
+            announcementText="Start your mock interview"
+            placeholder="Type a message or upload your resume..."
+            onSend={(msg) => {
+              if (!msg.trim()) return;
+              handleProcessMessage(msg, false);
+            }}
+          />
+        ) : (
+          <>
+            {/* Background Effects */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[120px]" />
+              <div className="absolute top-[60%] -right-[10%] w-[60%] h-[60%] rounded-full bg-sky-500/5 blur-[150px]" />
             </div>
-          </div>
-        </header>
 
-        {/* Camera Floating Box */}
-        {isVideoEnabled && (
-          <div className="absolute top-20 right-8 z-30 w-48 h-36 md:w-64 md:h-48 bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10 shadow-black/50 animate-in fade-in slide-in-from-top-4 duration-500">
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              playsInline 
-              muted
-              className="w-full h-full object-cover scale-x-[-1]" 
-            />
-            <button 
-              onClick={stopCamera}
-              className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-500/80 backdrop-blur-md rounded-lg text-white transition-colors"
-              title="Close Camera"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Chat History Area */}
-        <div className="flex-1 relative z-10 overflow-y-auto px-4 py-8 space-y-8 scroll-smooth">
-          <div className="max-w-3xl mx-auto w-full space-y-8">
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex flex-col space-y-2 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  {msg.role === 'ai' && (
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300 font-medium">
-                      <Settings className="w-3 h-3" /> JobTalk
-                    </div>
-                  )}
-                  <div className={`p-4 rounded-2xl ${
-                    msg.role === 'user' 
-                      ? 'bg-blue-600 text-white shadow-[0_4px_20px_-10px_rgba(37,99,235,0.4)] rounded-tr-none' 
-                      : 'bg-white/5 border border-white/10 text-slate-200 shadow-xl shadow-black/20 backdrop-blur-sm rounded-tl-none'
-                  }`}>
-                    {msg.role === 'user' ? (
-                       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                    ) : (
-                       <div className="prose prose-invert max-w-none text-slate-200 prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/10 prose-a:text-blue-400">
-                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                           {msg.content}
-                         </ReactMarkdown>
-                       </div>
-                    )}
-                  </div>
-                  {msg.role === 'ai' && (
-                    <div className="flex items-center gap-3 mt-1 px-1">
-                       <button
-                         onClick={() => {
-                           navigator.clipboard.writeText(msg.content);
-                           const btn = document.activeElement as HTMLElement;
-                           if (btn) {
-                             const original = btn.innerHTML;
-                             btn.innerHTML = '<svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied';
-                             setTimeout(() => btn.innerHTML = original, 2000);
-                           }
-                         }}
-                         className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
-                         title="Copy Message"
-                       >
-                         <Copy className="w-3 h-3" /> Copy
-                       </button>
-                       
-                       {idx === messages.length - 1 && (
-                         <button
-                           onClick={handleRegenerate}
-                           className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
-                           title="Regenerate Response"
-                         >
-                           <RefreshCw className="w-3 h-3" /> Regenerate
-                         </button>
-                       )}
-                    </div>
-                  )}
-                  {msg.revisedDoc && (
-                    <div className="w-full mt-2 bg-slate-900/50 border border-emerald-500/30 rounded-xl overflow-hidden shadow-lg shadow-emerald-900/20 backdrop-blur-sm animate-in slide-in-from-top-2">
-                      <div className="bg-emerald-500/10 px-4 py-2 border-b border-emerald-500/20 flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase tracking-wider">
-                          <FileText className="w-4 h-4" /> AI Revised Document
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={() => handleDownloadDocument(msg.revisedDoc!)}
-                            className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/40 px-2 py-1 rounded transition-colors"
-                          >
-                            <Download className="w-3.5 h-3.5" /> Download
-                          </button>
-                          <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(msg.revisedDoc!);
-                              const btn = document.activeElement as HTMLElement;
-                              if (btn) {
-                                const original = btn.innerHTML;
-                                btn.innerHTML = 'Copied!';
-                                setTimeout(() => btn.innerHTML = original, 2000);
-                              }
-                            }}
-                            className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/40 px-2 py-1 rounded transition-colors"
-                          >
-                            <Copy className="w-3.5 h-3.5" /> Copy
-                          </button>
-                        </div>
-                      </div>
-                      <div className="p-4 max-h-96 overflow-y-auto custom-scrollbar">
-                        <pre className="text-sm text-slate-300 whitespace-pre-wrap font-sans leading-relaxed">{msg.revisedDoc}</pre>
-                      </div>
-                    </div>
-                  )}
+            {/* Header */}
+            <header className="relative z-10 flex items-center justify-between px-4 md:px-8 py-4 border-b border-white/5 backdrop-blur-md shrink-0">
+              <div className="flex items-center gap-3">
+                {!isSidebarOpen && (
+                  <button 
+                    onClick={() => setIsSidebarOpen(true)}
+                    className="p-2 -ml-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+                  >
+                    <Menu className="w-5 h-5" />
+                  </button>
+                )}
+                <div>
+                  <h1 className="font-bold text-xl tracking-tight text-white leading-tight">JobTalk</h1>
+                  <p className="text-[10px] text-blue-400 font-semibold tracking-wider uppercase">Career Advisor</p>
                 </div>
               </div>
-            ))}
-            
-            {/* Active Voice Transcript Bubble */}
-            {(transcript || interimTranscript) && (
-               <div className="flex w-full justify-end">
-                 <div className="flex flex-col space-y-2 max-w-[80%] items-end opacity-70 animate-pulse">
-                   <div className="p-4 rounded-2xl bg-blue-600/50 text-white border border-blue-500/30 rounded-tr-none">
-                     <p className="whitespace-pre-wrap leading-relaxed italic">
-                       {transcript} <span className="text-white/60">{interimTranscript}</span>
-                     </p>
-                   </div>
-                 </div>
-               </div>
-            )}
-            
-            {/* Typing Indicator */}
-            {isProcessing && (
-              <div className="flex w-full justify-start">
-                 <div className="p-4 rounded-2xl bg-white/5 border border-white/10 rounded-tl-none flex gap-2 items-center">
-                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
-                 </div>
-              </div>
-            )}
-            <div ref={chatEndRef} className="h-4" />
-          </div>
-        </div>
+            </header>
 
-        {/* Input Area */}
-        <div className="relative z-10 w-full px-4 pb-6 pt-2 shrink-0 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent">
-          <div className="max-w-3xl mx-auto flex flex-col gap-2 relative">
-            
-            {attachedFile && (
-              <div className="self-start flex items-center gap-2 bg-blue-500/20 border border-blue-500/40 text-blue-200 px-3 py-1.5 rounded-xl text-sm backdrop-blur-md animate-in slide-in-from-bottom-2">
-                <FileText className="w-4 h-4" />
-                <span className="truncate max-w-[200px] font-medium">{attachedFile.name}</span>
+            {/* Camera Floating Box */}
+            {isVideoEnabled && (
+              <div className="absolute top-20 right-8 z-30 w-48 h-36 md:w-64 md:h-48 bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10 shadow-black/50 animate-in fade-in slide-in-from-top-4 duration-500">
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  playsInline 
+                  muted
+                  className="w-full h-full object-cover scale-x-[-1]" 
+                />
                 <button 
-                  type="button"
-                  onClick={() => setAttachedFile(null)}
-                  className="ml-1 p-1 hover:bg-blue-500/30 rounded-md transition-colors"
-                  title="Remove attachment"
+                  onClick={stopCamera}
+                  className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-500/80 backdrop-blur-md rounded-lg text-white transition-colors"
+                  title="Close Camera"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             )}
-            
-            {/* Text & Upload Input */}
-            <form onSubmit={handleTextSubmit} className="w-full bg-white/5 border border-white/10 rounded-3xl flex items-center p-1.5 focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all duration-300 backdrop-blur-xl shadow-lg shadow-black/20">
-              <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.txt,.md,.docx" onChange={handleFileUpload} />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="p-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
-                title="Upload Resume"
-                disabled={isProcessing}
-              >
-                <Paperclip className="w-5 h-5" />
-              </button>
-              <input 
-                type="text" 
-                value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                placeholder="Type a message or upload your resume..."
-                className="flex-1 bg-transparent border-none outline-none text-slate-200 placeholder:text-slate-500 px-2"
-                disabled={isProcessing}
-              />
-              <button
-                type="submit"
-                disabled={(!textInput.trim() && !attachedFile) || isProcessing}
-                className="p-3 text-blue-400 hover:text-white hover:bg-blue-600 rounded-full transition-colors disabled:opacity-30"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </form>
 
-            <div className="flex gap-2">
-              {/* Camera Toggle Button */}
-              <button
-                 onClick={toggleCamera}
-                 disabled={isProcessing}
-                 className={`shrink-0 flex items-center justify-center w-12 h-12 md:w-14 md:h-14 rounded-full transition-all duration-300 shadow-lg ${
-                   isVideoEnabled 
-                     ? 'bg-slate-700 text-white hover:bg-slate-600 shadow-black/20' 
-                     : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white shadow-black/20'
-                 } disabled:opacity-50`}
-                 title="Toggle Camera"
-               >
-                  {isVideoEnabled ? (
-                    <CameraOff className="w-5 h-5 md:w-6 md:h-6" />
-                  ) : (
-                    <Camera className="w-5 h-5 md:w-6 md:h-6" />
-                  )}
-              </button>
-
-              {/* Voice Record Button */}
-              <button
-                 onClick={toggleRecording}
-                 disabled={isProcessing}
-                 className={`shrink-0 flex items-center justify-center w-12 h-12 md:w-14 md:h-14 rounded-full transition-all duration-500 shadow-xl ${
-                   isRecording 
-                     ? 'bg-red-500 text-white animate-pulse shadow-red-500/30' 
-                     : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30'
-                 } disabled:opacity-50 disabled:pointer-events-none`}
-                 title="Toggle Microphone"
-               >
-                  {isRecording ? (
-                    <Square className="w-5 h-5 md:w-6 md:h-6 fill-current" />
-                  ) : (
-                    <Mic className="w-5 h-5 md:w-6 md:h-6 fill-current" />
-                  )}
-               </button>
+            {/* Chat History Area */}
+            <div className="flex-1 relative z-10 overflow-y-auto px-4 py-8 space-y-8 scroll-smooth">
+              <div className="max-w-3xl mx-auto w-full space-y-8">
+                {messages.map((msg, idx) => (
+                  <div key={idx} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex flex-col space-y-2 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      {msg.role === 'ai' && (
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300 font-medium">
+                          <Settings className="w-3 h-3" /> JobTalk
+                        </div>
+                      )}
+                      <div className={`p-4 rounded-2xl ${
+                        msg.role === 'user' 
+                          ? 'bg-blue-600 text-white shadow-[0_4px_20px_-10px_rgba(37,99,235,0.4)] rounded-tr-none' 
+                          : 'bg-white/5 border border-white/10 text-slate-200 shadow-xl shadow-black/20 backdrop-blur-sm rounded-tl-none'
+                      }`}>
+                        {msg.role === 'user' ? (
+                          <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                        ) : (
+                          <div className="prose prose-invert max-w-none text-slate-200 prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/10 prose-a:text-blue-400">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                      </div>
+                      {msg.role === 'ai' && (
+                        <div className="flex items-center gap-3 mt-1 px-1">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(msg.content);
+                              const btn = document.activeElement as HTMLElement;
+                              if (btn) {
+                                const original = btn.innerHTML;
+                                btn.innerHTML = '<svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied';
+                                setTimeout(() => btn.innerHTML = original, 2000);
+                              }
+                            }}
+                            className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
+                            title="Copy Message"
+                          >
+                            <Copy className="w-3 h-3" /> Copy
+                          </button>
+                          
+                          {idx === messages.length - 1 && (
+                            <button
+                              onClick={handleRegenerate}
+                              className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
+                              title="Regenerate Response"
+                            >
+                              <RefreshCw className="w-3 h-3" /> Regenerate
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {msg.revisedDoc && (
+                        <div className="w-full mt-2 bg-slate-900/50 border border-emerald-500/30 rounded-xl overflow-hidden shadow-lg shadow-emerald-900/20 backdrop-blur-sm animate-in slide-in-from-top-2">
+                          <div className="bg-emerald-500/10 px-4 py-2 border-b border-emerald-500/20 flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase tracking-wider">
+                              <FileText className="w-4 h-4" /> AI Revised Document
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => handleDownloadDocument(msg.revisedDoc!)}
+                                className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/40 px-2 py-1 rounded transition-colors"
+                              >
+                                <Download className="w-3.5 h-3.5" /> Download
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  navigator.clipboard.writeText(msg.revisedDoc!);
+                                  const btn = document.activeElement as HTMLElement;
+                                  if (btn) {
+                                    const original = btn.innerHTML;
+                                    btn.innerHTML = 'Copied!';
+                                    setTimeout(() => btn.innerHTML = original, 2000);
+                                  }
+                                }}
+                                className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/40 px-2 py-1 rounded transition-colors"
+                              >
+                                <Copy className="w-3.5 h-3.5" /> Copy
+                              </button>
+                            </div>
+                          </div>
+                          <div className="p-4 max-h-96 overflow-y-auto custom-scrollbar">
+                            <pre className="text-sm text-slate-300 whitespace-pre-wrap font-sans leading-relaxed">{msg.revisedDoc}</pre>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                
+                {/* Active Voice Transcript Bubble */}
+                {(transcript || interimTranscript) && (
+                  <div className="flex w-full justify-end">
+                    <div className="flex flex-col space-y-2 max-w-[80%] items-end opacity-70 animate-pulse">
+                      <div className="p-4 rounded-2xl bg-blue-600/50 text-white border border-blue-500/30 rounded-tr-none">
+                        <p className="whitespace-pre-wrap leading-relaxed italic">
+                          {transcript} <span className="text-white/60">{interimTranscript}</span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Typing Indicator */}
+                {isProcessing && (
+                  <div className="flex w-full justify-start">
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10 rounded-tl-none flex gap-2 items-center">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEndRef} className="h-4" />
+              </div>
             </div>
-          </div>
-        </div>
+
+            {/* Input Area */}
+            <div className="relative z-10 w-full px-4 pb-6 pt-2 shrink-0 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent">
+              <div className="max-w-3xl mx-auto flex flex-col gap-2 relative">
+                
+                {attachedFile && (
+                  <div className="self-start flex items-center gap-2 bg-blue-500/20 border border-blue-500/40 text-blue-200 px-3 py-1.5 rounded-xl text-sm backdrop-blur-md animate-in slide-in-from-bottom-2">
+                    <FileText className="w-4 h-4" />
+                    <span className="truncate max-w-[200px] font-medium">{attachedFile.name}</span>
+                    <button 
+                      type="button"
+                      onClick={() => setAttachedFile(null)}
+                      className="ml-1 p-1 hover:bg-blue-500/30 rounded-md transition-colors"
+                      title="Remove attachment"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+                
+                {/* Text & Upload Input */}
+                <form onSubmit={handleTextSubmit} className="w-full bg-white/5 border border-white/10 rounded-3xl flex items-center p-1.5 focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all duration-300 backdrop-blur-xl shadow-lg shadow-black/20">
+                  <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.txt,.md,.docx" onChange={handleFileUpload} />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
+                    title="Upload Resume"
+                    disabled={isProcessing}
+                  >
+                    <Paperclip className="w-5 h-5" />
+                  </button>
+                  <input 
+                    type="text" 
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    placeholder="Type a message or upload your resume..."
+                    className="flex-1 bg-transparent border-none outline-none text-slate-200 placeholder:text-slate-500 px-2"
+                    disabled={isProcessing}
+                  />
+                  <button
+                    type="submit"
+                    disabled={(!textInput.trim() && !attachedFile) || isProcessing}
+                    className="p-3 text-blue-400 hover:text-white hover:bg-blue-600 rounded-full transition-colors disabled:opacity-30"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
+                </form>
+
+                <div className="flex gap-2">
+                  {/* Camera Toggle Button */}
+                  <button
+                    onClick={toggleCamera}
+                    disabled={isProcessing}
+                    className={`shrink-0 flex items-center justify-center w-12 h-12 md:w-14 md:h-14 rounded-full transition-all duration-300 shadow-lg ${
+                      isVideoEnabled 
+                        ? 'bg-slate-700 text-white hover:bg-slate-600 shadow-black/20' 
+                        : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white shadow-black/20'
+                    } disabled:opacity-50`}
+                    title="Toggle Camera"
+                  >
+                      {isVideoEnabled ? (
+                        <CameraOff className="w-5 h-5 md:w-6 md:h-6" />
+                      ) : (
+                        <Camera className="w-5 h-5 md:w-6 md:h-6" />
+                      )}
+                  </button>
+
+                  {/* Voice Record Button */}
+                  <button
+                    onClick={toggleRecording}
+                    disabled={isProcessing}
+                    className={`shrink-0 flex items-center justify-center w-12 h-12 md:w-14 md:h-14 rounded-full transition-all duration-500 shadow-xl ${
+                      isRecording 
+                        ? 'bg-red-500 text-white animate-pulse shadow-red-500/30' 
+                        : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30'
+                    } disabled:opacity-50 disabled:pointer-events-none`}
+                    title="Toggle Microphone"
+                  >
+                      {isRecording ? (
+                        <Square className="w-5 h-5 md:w-6 md:h-6 fill-current" />
+                      ) : (
+                        <Mic className="w-5 h-5 md:w-6 md:h-6 fill-current" />
+                      )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </main>
     </div>
   );
